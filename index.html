@@ -1,1 +1,495 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lambert II étendu vers Latitude / Longitude</title>
+    <script src="https://cdn.jsdelivr.net/npm/proj4@2.9.2/dist/proj4.js"></script>
+    <style>
+        body {
+            font-family: "Times New Roman", serif;
+            margin: 24px;
+            color: #000;
+        }
 
+        h1 {
+            font-size: 24px;
+            margin-bottom: 24px;
+        }
+
+        .row {
+            margin-bottom: 12px;
+        }
+
+        label {
+            display: inline-block;
+            min-width: 230px;
+            vertical-align: middle;
+        }
+
+        input[type="text"], select {
+            width: 220px;
+            padding: 3px 6px;
+            font-size: 16px;
+            box-sizing: border-box;
+        }
+
+        input[readonly] {
+            background: #f8f8f8;
+        }
+
+        button {
+            padding: 4px 10px;
+            font-size: 16px;
+            margin-right: 8px;
+            cursor: pointer;
+        }
+
+        .actions {
+            margin-top: 18px;
+            margin-bottom: 18px;
+        }
+
+        .section {
+            margin-top: 22px;
+            margin-bottom: 10px;
+            font-weight: bold;
+            font-size: 18px;
+        }
+
+        .status {
+            margin-top: 14px;
+            min-height: 22px;
+            font-weight: bold;
+        }
+
+        .status.success {
+            color: #0a7a0a;
+        }
+
+        .status.error {
+            color: #b00020;
+        }
+    </style>
+</head>
+<body>
+    <h1>Lambert II étendu vers Latitude / Longitude</h1>
+
+    <div class="row">
+        <label for="coordX">X :</label>
+        <input type="text" id="coordX" value="600000" autocomplete="off">
+    </div>
+
+    <div class="row">
+        <label for="coordY">Y :</label>
+        <input type="text" id="coordY" value="2200000" autocomplete="off">
+    </div>
+
+    <div class="row">
+        <label for="decimalSeparator">Séparateur décimal (lat-long) :</label>
+        <select id="decimalSeparator">
+            <option value=".">Point (.)</option>
+            <option value=",">Virgule (,)</option>
+        </select>
+    </div>
+
+    <div class="actions">
+        <button type="button" id="btnConvert">Convertir</button>
+        <button type="button" id="btnClear">Effacer</button>
+        <button type="button" id="btnCopyLat">Copier Latitude</button>
+        <button type="button" id="btnCopyLon">Copier Longitude</button>
+    </div>
+
+    <div class="section">Résultats</div>
+
+    <div class="row">
+        <label for="resultLat">Latitude :</label>
+        <input type="text" id="resultLat" readonly>
+    </div>
+
+    <div class="row">
+        <label for="resultLon">Longitude :</label>
+        <input type="text" id="resultLon" readonly>
+    </div>
+
+    <div class="section">Comparaison</div>
+
+    <div class="row">
+        <label for="compareLat">Latitude à comparer :</label>
+        <input type="text" id="compareLat" autocomplete="off">
+    </div>
+
+    <div class="row">
+        <label for="compareLon">Longitude à comparer :</label>
+        <input type="text" id="compareLon" autocomplete="off">
+    </div>
+
+    <div class="section">Deltas</div>
+
+    <div class="row">
+        <label for="deltaX">Delta X (m) :</label>
+        <input type="text" id="deltaX" readonly>
+    </div>
+
+    <div class="row">
+        <label for="deltaY">Delta Y (m) :</label>
+        <input type="text" id="deltaY" readonly>
+    </div>
+
+    <div class="row">
+        <label for="deltaDistance">DeltaDistance (m) :</label>
+        <input type="text" id="deltaDistance" readonly>
+    </div>
+
+    <div id="status" class="status"></div>
+
+    <script>
+        const DECIMALS_LATLON = 7;
+        const DECIMALS_DELTA = 3;
+
+        let projectionReady = false;
+
+        function setStatus(message, type) {
+            const status = document.getElementById("status");
+            status.textContent = message || "";
+            status.className = "status" + (type ? " " + type : "");
+        }
+
+        function normalizeNumericString(value) {
+            return String(value).trim().replace(/\s+/g, "").replace(",", ".");
+        }
+
+        function parseFlexibleNumber(value) {
+            const normalized = normalizeNumericString(value);
+
+            if (normalized === "") {
+                return { empty: true, valid: false, value: null };
+            }
+
+            const numericPattern = /^[+-]?(?:\d+\.?\d*|\d*\.?\d+)$/;
+
+            if (!numericPattern.test(normalized)) {
+                return { empty: false, valid: false, value: null };
+            }
+
+            const parsed = Number(normalized);
+
+            if (!Number.isFinite(parsed)) {
+                return { empty: false, valid: false, value: null };
+            }
+
+            return { empty: false, valid: true, value: parsed };
+        }
+
+        function formatNumber(value, decimals) {
+            const separator = document.getElementById("decimalSeparator").value;
+            let text = Number(value).toFixed(decimals);
+
+            if (separator === ",") {
+                text = text.replace(".", ",");
+            }
+
+            return text;
+        }
+
+        function clearResults() {
+            document.getElementById("resultLat").value = "";
+            document.getElementById("resultLon").value = "";
+        }
+
+        function clearDeltas() {
+            document.getElementById("deltaX").value = "";
+            document.getElementById("deltaY").value = "";
+            document.getElementById("deltaDistance").value = "";
+        }
+
+        function clearAllFields() {
+            document.getElementById("coordX").value = "";
+            document.getElementById("coordY").value = "";
+            document.getElementById("resultLat").value = "";
+            document.getElementById("resultLon").value = "";
+            document.getElementById("compareLat").value = "";
+            document.getElementById("compareLon").value = "";
+            document.getElementById("deltaX").value = "";
+            document.getElementById("deltaY").value = "";
+            document.getElementById("deltaDistance").value = "";
+            setStatus("", "");
+        }
+
+        async function initProjection() {
+            try {
+                setStatus("Chargement de la grille NTv2...", "success");
+
+                const response = await fetch("ntf_r93.gsb", { cache: "no-store" });
+
+                if (!response.ok) {
+                    throw new Error("Fichier ntf_r93.gsb introuvable.");
+                }
+
+                const buffer = await response.arrayBuffer();
+
+                // Enregistrement de la grille dans Proj4js
+                proj4.nadgrid("ntf_r93.gsb", buffer);
+
+                // Lambert II étendu / NTF (Paris) avec grille NTv2
+                proj4.defs(
+                    "EPSG:27572_GRID",
+                    "+proj=lcc +lat_1=46.8 +lat_0=46.8 +lon_0=0 +k_0=0.99987742 " +
+                    "+x_0=600000 +y_0=2200000 +ellps=clrk80ign +pm=paris " +
+                    "+nadgrids=ntf_r93.gsb +units=m +no_defs +type=crs"
+                );
+
+                projectionReady = true;
+                setStatus("Grille NTv2 chargée. Conversion prête.", "success");
+
+                convertLambertToLatLon();
+            } catch (error) {
+                projectionReady = false;
+                clearResults();
+                clearDeltas();
+                setStatus(
+                    "Impossible de charger la grille ntf_r93.gsb. Vérifiez sa présence à côté du fichier HTML et lancez la page via un serveur web.",
+                    "error"
+                );
+                console.error(error);
+            }
+        }
+
+        function convertLambertToLatLon() {
+            if (!projectionReady) {
+                return null;
+            }
+
+            const xParsed = parseFlexibleNumber(document.getElementById("coordX").value);
+            const yParsed = parseFlexibleNumber(document.getElementById("coordY").value);
+
+            clearResults();
+            clearDeltas();
+
+            if (xParsed.empty || yParsed.empty) {
+                setStatus("Veuillez renseigner X et Y.", "error");
+                return null;
+            }
+
+            if (!xParsed.valid) {
+                setStatus("La valeur X n'est pas numérique.", "error");
+                return null;
+            }
+
+            if (!yParsed.valid) {
+                setStatus("La valeur Y n'est pas numérique.", "error");
+                return null;
+            }
+
+            try {
+                const result = proj4("EPSG:27572_GRID", "EPSG:4326", [xParsed.value, yParsed.value]);
+                const lon = result[0];
+                const lat = result[1];
+
+                document.getElementById("resultLat").value = formatNumber(lat, DECIMALS_LATLON);
+                document.getElementById("resultLon").value = formatNumber(lon, DECIMALS_LATLON);
+
+                calculateDeltasIfPossible(lat, lon);
+
+                if (
+                    document.getElementById("deltaX").value ||
+                    document.getElementById("deltaY").value ||
+                    document.getElementById("deltaDistance").value
+                ) {
+                    setStatus("Conversion et calcul des deltas effectués.", "success");
+                } else {
+                    setStatus("Conversion effectuée.", "success");
+                }
+
+                return { lat, lon };
+            } catch (error) {
+                clearResults();
+                clearDeltas();
+                setStatus("Erreur lors de la conversion des coordonnées.", "error");
+                console.error(error);
+                return null;
+            }
+        }
+
+        function calculateDeltasIfPossible(calculatedLat, calculatedLon) {
+            const compareLatParsed = parseFlexibleNumber(document.getElementById("compareLat").value);
+            const compareLonParsed = parseFlexibleNumber(document.getElementById("compareLon").value);
+
+            clearDeltas();
+
+            const hasLat = !compareLatParsed.empty;
+            const hasLon = !compareLonParsed.empty;
+
+            if (!hasLat && !hasLon) {
+                return;
+            }
+
+            if (hasLat && !compareLatParsed.valid) {
+                setStatus("La latitude à comparer n'est pas numérique.", "error");
+                return;
+            }
+
+            if (hasLon && !compareLonParsed.valid) {
+                setStatus("La longitude à comparer n'est pas numérique.", "error");
+                return;
+            }
+
+            let deltaX = null;
+            let deltaY = null;
+
+            if (hasLat) {
+                deltaY = (calculatedLat - compareLatParsed.value) * 111132.0;
+                document.getElementById("deltaY").value = formatNumber(deltaY, DECIMALS_DELTA);
+            }
+
+            if (hasLon) {
+                const latitudeReference = hasLat
+                    ? (calculatedLat + compareLatParsed.value) / 2
+                    : calculatedLat;
+
+                const latRefRad = latitudeReference * Math.PI / 180.0;
+                deltaX = (calculatedLon - compareLonParsed.value) * 111320.0 * Math.cos(latRefRad);
+                document.getElementById("deltaX").value = formatNumber(deltaX, DECIMALS_DELTA);
+            }
+
+            if (deltaX !== null && deltaY !== null) {
+                const deltaDistance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+                document.getElementById("deltaDistance").value = formatNumber(deltaDistance, DECIMALS_DELTA);
+            }
+        }
+
+        async function copyFieldValue(fieldId, label) {
+            const value = document.getElementById(fieldId).value;
+
+            if (!value || value.trim() === "") {
+                setStatus(label + " indisponible.", "error");
+                return;
+            }
+
+            try {
+                if (navigator.clipboard && window.isSecureContext) {
+                    await navigator.clipboard.writeText(String(value));
+                    setStatus(label + " copiée dans le presse-papier.", "success");
+                    return;
+                }
+            } catch (error) {
+            }
+
+            try {
+                const area = document.createElement("textarea");
+                area.value = String(value);
+                area.setAttribute("readonly", "");
+                area.style.position = "fixed";
+                area.style.top = "0";
+                area.style.left = "0";
+                area.style.width = "1px";
+                area.style.height = "1px";
+                area.style.padding = "0";
+                area.style.border = "none";
+                area.style.outline = "none";
+                area.style.boxShadow = "none";
+                area.style.background = "transparent";
+
+                document.body.appendChild(area);
+                area.focus();
+                area.select();
+                area.setSelectionRange(0, area.value.length);
+
+                const ok = document.execCommand("copy");
+                document.body.removeChild(area);
+
+                if (ok) {
+                    setStatus(label + " copiée dans le presse-papier.", "success");
+                } else {
+                    setStatus("Copie impossible dans ce navigateur.", "error");
+                }
+            } catch (error) {
+                setStatus("Copie impossible dans ce navigateur.", "error");
+            }
+        }
+
+        function refreshOutputsFormatting() {
+            const latResult = parseFlexibleNumber(document.getElementById("resultLat").value);
+            const lonResult = parseFlexibleNumber(document.getElementById("resultLon").value);
+            const deltaX = parseFlexibleNumber(document.getElementById("deltaX").value);
+            const deltaY = parseFlexibleNumber(document.getElementById("deltaY").value);
+            const deltaDistance = parseFlexibleNumber(document.getElementById("deltaDistance").value);
+
+            if (latResult.valid) {
+                document.getElementById("resultLat").value = formatNumber(latResult.value, DECIMALS_LATLON);
+            }
+
+            if (lonResult.valid) {
+                document.getElementById("resultLon").value = formatNumber(lonResult.value, DECIMALS_LATLON);
+            }
+
+            if (deltaX.valid) {
+                document.getElementById("deltaX").value = formatNumber(deltaX.value, DECIMALS_DELTA);
+            }
+
+            if (deltaY.valid) {
+                document.getElementById("deltaY").value = formatNumber(deltaY.value, DECIMALS_DELTA);
+            }
+
+            if (deltaDistance.valid) {
+                document.getElementById("deltaDistance").value = formatNumber(deltaDistance.value, DECIMALS_DELTA);
+            }
+        }
+
+        function handleAutoUpdate() {
+            convertLambertToLatLon();
+        }
+
+        document.getElementById("btnConvert").addEventListener("click", function() {
+            convertLambertToLatLon();
+        });
+
+        document.getElementById("btnClear").addEventListener("click", function() {
+            clearAllFields();
+        });
+
+        document.getElementById("btnCopyLat").addEventListener("click", function() {
+            copyFieldValue("resultLat", "Latitude");
+        });
+
+        document.getElementById("btnCopyLon").addEventListener("click", function() {
+            copyFieldValue("resultLon", "Longitude");
+        });
+
+        document.getElementById("coordX").addEventListener("keydown", function(event) {
+            if (event.key === "Enter") {
+                convertLambertToLatLon();
+            }
+        });
+
+        document.getElementById("coordY").addEventListener("keydown", function(event) {
+            if (event.key === "Enter") {
+                convertLambertToLatLon();
+            }
+        });
+
+        document.getElementById("compareLat").addEventListener("keydown", function(event) {
+            if (event.key === "Enter") {
+                convertLambertToLatLon();
+            }
+        });
+
+        document.getElementById("compareLon").addEventListener("keydown", function(event) {
+            if (event.key === "Enter") {
+                convertLambertToLatLon();
+            }
+        });
+
+        document.getElementById("coordX").addEventListener("input", handleAutoUpdate);
+        document.getElementById("coordY").addEventListener("input", handleAutoUpdate);
+        document.getElementById("compareLat").addEventListener("input", handleAutoUpdate);
+        document.getElementById("compareLon").addEventListener("input", handleAutoUpdate);
+
+        document.getElementById("decimalSeparator").addEventListener("change", function() {
+            refreshOutputsFormatting();
+        });
+
+        initProjection();
+    </script>
+</body>
+</html>
