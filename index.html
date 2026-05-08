@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Lambert II étendu vers Latitude / Longitude</title>
+    <title>Lambert II étendu vers Lat-Long et X-Y UTM</title>
     <script src="https://cdn.jsdelivr.net/npm/proj4@2.9.2/dist/proj4.js"></script>
     <style>
         body {
@@ -34,15 +34,31 @@
             box-sizing: border-box;
         }
 
+        input[type="text"]:not([readonly]) {
+            border: 2px solid #c00000;
+        }
+
         input[readonly] {
             background: #f8f8f8;
+            border: 2px solid #0066cc;
         }
 
         button {
             padding: 4px 10px;
             font-size: 16px;
             margin-right: 8px;
+            margin-bottom: 8px;
             cursor: pointer;
+        }
+
+        .convert-button {
+            background: #b7f7b7;
+            border: 1px solid #4caf50;
+            color: #000;
+        }
+
+        .convert-button:hover {
+            background: #9ff09f;
         }
 
         .actions {
@@ -73,7 +89,7 @@
     </style>
 </head>
 <body>
-    <h1>Lambert II étendu vers Latitude / Longitude</h1>
+    <h1>Lambert II étendu vers Lat-Long et X-Y UTM</h1>
 
     <div class="row">
         <label for="coordX">X :</label>
@@ -86,7 +102,7 @@
     </div>
 
     <div class="row">
-        <label for="decimalSeparator">Séparateur décimal (lat-long) :</label>
+        <label for="decimalSeparator">Séparateur décimal :</label>
         <select id="decimalSeparator">
             <option value=".">Point (.)</option>
             <option value=",">Virgule (,)</option>
@@ -94,33 +110,60 @@
     </div>
 
     <div class="actions">
-        <button type="button" id="btnConvert">Convertir</button>
+        <button type="button" id="btnConvert" class="convert-button">Convertir</button>
         <button type="button" id="btnClear">Effacer</button>
         <button type="button" id="btnCopyLat">Copier Latitude</button>
         <button type="button" id="btnCopyLon">Copier Longitude</button>
+        <button type="button" id="btnCopyUtmX">Copier X(UTM)</button>
+        <button type="button" id="btnCopyUtmY">Copier Y(UTM)</button>
     </div>
 
     <div class="section">Résultats</div>
 
     <div class="row">
-        <label for="resultLat">Latitude :</label>
+        <label for="resultLat">Latitude(°) :</label>
         <input type="text" id="resultLat" readonly>
     </div>
 
     <div class="row">
-        <label for="resultLon">Longitude :</label>
+        <label for="resultLon">Longitude(°) :</label>
         <input type="text" id="resultLon" readonly>
     </div>
 
-    <div class="section">Comparaison</div>
+    <div class="row">
+        <label for="resultUtmX">X(UTM) :</label>
+        <input type="text" id="resultUtmX" readonly>
+    </div>
 
     <div class="row">
-        <label for="compareLat">Latitude à comparer :</label>
+        <label for="resultUtmY">Y(UTM) :</label>
+        <input type="text" id="resultUtmY" readonly>
+    </div>
+
+    <div class="row">
+        <label for="resultUtmZoneNumber">Fuseau UTM :</label>
+        <input type="text" id="resultUtmZoneNumber" readonly>
+    </div>
+
+    <div class="row">
+        <label for="resultUtmZoneLetter">Bande UTM :</label>
+        <input type="text" id="resultUtmZoneLetter" readonly>
+    </div>
+
+    <div class="row">
+        <label for="resultUtmZone">Zone UTM :</label>
+        <input type="text" id="resultUtmZone" readonly>
+    </div>
+
+    <div class="section">Comparaison Latitude et Longitude</div>
+
+    <div class="row">
+        <label for="compareLat">Latitude(°) à comparer :</label>
         <input type="text" id="compareLat" autocomplete="off">
     </div>
 
     <div class="row">
-        <label for="compareLon">Longitude à comparer :</label>
+        <label for="compareLon">Longitude(°) à comparer :</label>
         <input type="text" id="compareLon" autocomplete="off">
     </div>
 
@@ -146,6 +189,7 @@
     <script>
         const DECIMALS_LATLON = 8;
         const DECIMALS_DELTA = 3;
+        const DECIMALS_UTM = 3;
 
         let projectionReady = false;
 
@@ -195,6 +239,11 @@
         function clearResults() {
             document.getElementById("resultLat").value = "";
             document.getElementById("resultLon").value = "";
+            document.getElementById("resultUtmX").value = "";
+            document.getElementById("resultUtmY").value = "";
+            document.getElementById("resultUtmZoneNumber").value = "";
+            document.getElementById("resultUtmZoneLetter").value = "";
+            document.getElementById("resultUtmZone").value = "";
         }
 
         function clearDeltas() {
@@ -206,13 +255,22 @@
         function clearAllFields() {
             document.getElementById("coordX").value = "";
             document.getElementById("coordY").value = "";
+
             document.getElementById("resultLat").value = "";
             document.getElementById("resultLon").value = "";
+            document.getElementById("resultUtmX").value = "";
+            document.getElementById("resultUtmY").value = "";
+            document.getElementById("resultUtmZoneNumber").value = "";
+            document.getElementById("resultUtmZoneLetter").value = "";
+            document.getElementById("resultUtmZone").value = "";
+
             document.getElementById("compareLat").value = "";
             document.getElementById("compareLon").value = "";
+
             document.getElementById("deltaX").value = "";
             document.getElementById("deltaY").value = "";
             document.getElementById("deltaDistance").value = "";
+
             setStatus("", "");
         }
 
@@ -228,10 +286,10 @@
 
                 const buffer = await response.arrayBuffer();
 
-                // Enregistrement de la grille dans Proj4js
+                // Enregistrement de la grille dans Proj4js.
                 proj4.nadgrid("ntf_r93.gsb", buffer);
 
-                // Lambert II étendu / NTF (Paris) avec grille NTv2
+                // Lambert II étendu / NTF Paris avec grille NTv2 vers RGF93/WGS84.
                 proj4.defs(
                     "EPSG:27572_GRID",
                     "+proj=lcc +lat_1=46.8 +lat_0=46.8 +lon_0=0 +k_0=0.99987742 " +
@@ -253,6 +311,124 @@
                 );
                 console.error(error);
             }
+        }
+
+        function degToRad(deg) {
+            return deg * Math.PI / 180.0;
+        }
+
+        function getUtmZoneNumber(lat, lon) {
+            let zone = Math.floor((lon + 180) / 6) + 1;
+
+            // Cas spécial Norvège.
+            if (lat >= 56.0 && lat < 64.0 && lon >= 3.0 && lon < 12.0) {
+                zone = 32;
+            }
+
+            // Cas spéciaux Svalbard.
+            if (lat >= 72.0 && lat < 84.0) {
+                if (lon >= 0.0 && lon < 9.0) zone = 31;
+                if (lon >= 9.0 && lon < 21.0) zone = 33;
+                if (lon >= 21.0 && lon < 33.0) zone = 35;
+                if (lon >= 33.0 && lon < 42.0) zone = 37;
+            }
+
+            return zone;
+        }
+
+        function getUtmZoneLetter(lat) {
+            if (lat < -80 || lat > 84) {
+                return "";
+            }
+
+            const letters = "CDEFGHJKLMNPQRSTUVWX";
+            const index = Math.min(Math.floor((lat + 80) / 8), 19);
+
+            return letters.charAt(index);
+        }
+
+        function latLonToUtm(lat, lon) {
+            // Ellipsoïde WGS84.
+            const a = 6378137.0;
+            const f = 1 / 298.257223563;
+            const k0 = 0.9996;
+            const e2 = f * (2 - f);
+            const ep2 = e2 / (1 - e2);
+
+            const zoneNumber = getUtmZoneNumber(lat, lon);
+            const zoneLetter = getUtmZoneLetter(lat);
+
+            const lonOrigin = (zoneNumber - 1) * 6 - 180 + 3;
+
+            const latRad = degToRad(lat);
+            const lonRad = degToRad(lon);
+            const lonOriginRad = degToRad(lonOrigin);
+
+            const sinLat = Math.sin(latRad);
+            const cosLat = Math.cos(latRad);
+            const tanLat = Math.tan(latRad);
+
+            const N = a / Math.sqrt(1 - e2 * sinLat * sinLat);
+            const T = tanLat * tanLat;
+            const C = ep2 * cosLat * cosLat;
+            const A = cosLat * (lonRad - lonOriginRad);
+
+            const M = a * (
+                (1 - e2 / 4 - 3 * e2 * e2 / 64 - 5 * e2 * e2 * e2 / 256) * latRad
+                - (3 * e2 / 8 + 3 * e2 * e2 / 32 + 45 * e2 * e2 * e2 / 1024) * Math.sin(2 * latRad)
+                + (15 * e2 * e2 / 256 + 45 * e2 * e2 * e2 / 1024) * Math.sin(4 * latRad)
+                - (35 * e2 * e2 * e2 / 3072) * Math.sin(6 * latRad)
+            );
+
+            let easting = k0 * N * (
+                A
+                + (1 - T + C) * Math.pow(A, 3) / 6
+                + (5 - 18 * T + T * T + 72 * C - 58 * ep2) * Math.pow(A, 5) / 120
+            ) + 500000.0;
+
+            let northing = k0 * (
+                M
+                + N * tanLat * (
+                    A * A / 2
+                    + (5 - T + 9 * C + 4 * C * C) * Math.pow(A, 4) / 24
+                    + (61 - 58 * T + T * T + 600 * C - 330 * ep2) * Math.pow(A, 6) / 720
+                )
+            );
+
+            // Faux nord en hémisphère sud.
+            if (lat < 0) {
+                northing += 10000000.0;
+            }
+
+            return {
+                x: easting,
+                y: northing,
+                zoneNumber: zoneNumber,
+                zoneLetter: zoneLetter,
+                utmZone: zoneLetter ? String(zoneNumber) + zoneLetter : String(zoneNumber)
+            };
+        }
+
+        function writeUtmResults(lat, lon) {
+            document.getElementById("resultUtmX").value = "";
+            document.getElementById("resultUtmY").value = "";
+            document.getElementById("resultUtmZoneNumber").value = "";
+            document.getElementById("resultUtmZoneLetter").value = "";
+            document.getElementById("resultUtmZone").value = "";
+
+            if (lat < -80 || lat > 84 || lon < -180 || lon > 180) {
+                return false;
+            }
+
+            const utm = latLonToUtm(lat, lon);
+
+            document.getElementById("resultUtmX").value = formatNumber(utm.x, DECIMALS_UTM);
+            document.getElementById("resultUtmY").value = formatNumber(utm.y, DECIMALS_UTM);
+            document.getElementById("resultUtmZoneNumber").value = utm.zoneNumber;
+            document.getElementById("resultUtmZoneLetter").value = utm.zoneLetter;
+            document.getElementById("resultUtmZone").value = utm.utmZone;
+
+            return true;
         }
 
         function convertLambertToLatLon() {
@@ -289,16 +465,23 @@
                 document.getElementById("resultLat").value = formatNumber(lat, DECIMALS_LATLON);
                 document.getElementById("resultLon").value = formatNumber(lon, DECIMALS_LATLON);
 
+                const utmAvailable = writeUtmResults(lat, lon);
+
                 calculateDeltasIfPossible(lat, lon);
 
-                if (
+                const hasDeltas =
                     document.getElementById("deltaX").value ||
                     document.getElementById("deltaY").value ||
-                    document.getElementById("deltaDistance").value
-                ) {
-                    setStatus("Conversion et calcul des deltas effectués.", "success");
+                    document.getElementById("deltaDistance").value;
+
+                if (hasDeltas && utmAvailable) {
+                    setStatus("Conversion, calcul UTM et calcul des deltas effectués.", "success");
+                } else if (utmAvailable) {
+                    setStatus("Conversion et calcul UTM effectués.", "success");
+                } else if (hasDeltas) {
+                    setStatus("Conversion et calcul des deltas effectués. Coordonnées hors domaine UTM standard.", "success");
                 } else {
-                    setStatus("Conversion effectuée.", "success");
+                    setStatus("Conversion effectuée. Coordonnées hors domaine UTM standard.", "success");
                 }
 
                 return { lat, lon };
@@ -411,6 +594,8 @@
         function refreshOutputsFormatting() {
             const latResult = parseFlexibleNumber(document.getElementById("resultLat").value);
             const lonResult = parseFlexibleNumber(document.getElementById("resultLon").value);
+            const utmX = parseFlexibleNumber(document.getElementById("resultUtmX").value);
+            const utmY = parseFlexibleNumber(document.getElementById("resultUtmY").value);
             const deltaX = parseFlexibleNumber(document.getElementById("deltaX").value);
             const deltaY = parseFlexibleNumber(document.getElementById("deltaY").value);
             const deltaDistance = parseFlexibleNumber(document.getElementById("deltaDistance").value);
@@ -421,6 +606,14 @@
 
             if (lonResult.valid) {
                 document.getElementById("resultLon").value = formatNumber(lonResult.value, DECIMALS_LATLON);
+            }
+
+            if (utmX.valid) {
+                document.getElementById("resultUtmX").value = formatNumber(utmX.value, DECIMALS_UTM);
+            }
+
+            if (utmY.valid) {
+                document.getElementById("resultUtmY").value = formatNumber(utmY.value, DECIMALS_UTM);
             }
 
             if (deltaX.valid) {
@@ -454,6 +647,14 @@
 
         document.getElementById("btnCopyLon").addEventListener("click", function() {
             copyFieldValue("resultLon", "Longitude");
+        });
+
+        document.getElementById("btnCopyUtmX").addEventListener("click", function() {
+            copyFieldValue("resultUtmX", "X(UTM)");
+        });
+
+        document.getElementById("btnCopyUtmY").addEventListener("click", function() {
+            copyFieldValue("resultUtmY", "Y(UTM)");
         });
 
         document.getElementById("coordX").addEventListener("keydown", function(event) {
